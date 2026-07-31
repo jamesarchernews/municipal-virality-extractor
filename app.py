@@ -40,6 +40,10 @@ with tab2:
 # --- PIPELINE EXECUTION ---
 if video_path:
     st.divider()
+    
+    # ADDED SLIDER HERE: Controls how many clips to output
+    num_clips = st.slider("How many viral clips do you want to generate?", min_value=5, max_value=20, value=10)
+    
     st.subheader("Running Algorithm...")
     
     with st.spinner("Extracting audio and transcribing..."):
@@ -56,19 +60,29 @@ if video_path:
         
         st.success("Analysis Complete!")
         
-        # Mocking the output for the UI setup
-        final_ranked_clips = [
+        # For the mock UI, we slice the list using the slider's value
+        # In the real app, it would be: final_ranked_clips = fuse_modalities(...)[:num_clips]
+        
+        # We need enough mock data to show the slider working
+        mock_clips = [
             {"start": 120, "end": 185, "metrics": {"virality_score": 0.92}, "text": "This policy is an absolute failure and you know it!"},
-            {"start": 3400, "end": 3450, "metrics": {"virality_score": 0.85}, "text": "Order! Order in the chamber!"}
+            {"start": 3400, "end": 3450, "metrics": {"virality_score": 0.85}, "text": "Order! Order in the chamber!"},
+            {"start": 4120, "end": 4190, "metrics": {"virality_score": 0.78}, "text": "I yield my time to the gentleman from the third district."},
+            {"start": 5000, "end": 5040, "metrics": {"virality_score": 0.72}, "text": "Are you out of your mind? That budget is completely fabricated!"},
+            {"start": 6200, "end": 6260, "metrics": {"virality_score": 0.68}, "text": "We need to clear the room immediately!"},
+            {"start": 7100, "end": 7180, "metrics": {"virality_score": 0.65}, "text": "The vote passes four to three."},
+            {"start": 8000, "end": 8050, "metrics": {"virality_score": 0.61}, "text": "You cannot silence the public!"},
+            {"start": 9200, "end": 9245, "metrics": {"virality_score": 0.58}, "text": "This meeting is adjourned."},
+            {"start": 10000, "end": 10050, "metrics": {"virality_score": 0.55}, "text": "Point of personal privilege, Madam Chair."},
+            {"start": 11000, "end": 11070, "metrics": {"virality_score": 0.51}, "text": "The numbers simply do not add up."}
         ]
         
-    st.subheader("Top Viral Candidates")
+        final_ranked_clips = mock_clips[:num_clips]
+        
+    st.subheader(f"Top {num_clips} Viral Candidates")
     for i, clip in enumerate(final_ranked_clips):
         with st.expander(f"Clip {i+1} | Score: {clip['metrics']['virality_score']} | {clip['start']}s - {clip['end']}s"):
             st.write(f"**Transcript:** {clip['text']}")
             
-            # Step 4: Render the actual video clip upon user request to save time
             if st.button(f"Generate Video for Clip {i+1}", key=f"btn_{i}"):
                 st.info("FFmpeg is cutting the video. Please wait...")
-                # Call your utils/clip_generator.py here
-                # st.video("path_to_final_clip.mp4")
