@@ -1,17 +1,18 @@
 import streamlit as st
 import yt_dlp
 import os
-import uuid # For generating unique IDs for each processed video
+import uuid
+
+from src.audio_utils import extract_audio_from_video, detect_volume_spikes
+from src.text_utils import analyze_and_extract
+from src.fusion import fuse_modalities
 
 st.set_page_config(page_title="Municipal Virality Dashboard", layout="wide")
 
-# --- INITIALIZE SESSION STATE ---
-# This is the crucial step that creates your "Library"
-# It remembers videos and clips even if you upload a new one
+# Persistent Video Library State
 if 'video_library' not in st.session_state:
     st.session_state.video_library = []
 
-# --- HELPER FUNCTIONS ---
 def format_timestamp(seconds):
     hours = int(seconds // 3600)
     minutes = int((seconds % 3600) // 60)
@@ -21,97 +22,78 @@ def format_timestamp(seconds):
     return f"{minutes:02}:{secs:02}"
 
 def add_to_library(title, clips):
-    """Saves the processed video and its clips to the permanent session state."""
     st.session_state.video_library.insert(0, {
         "id": str(uuid.uuid4()),
         "title": title,
         "clips": clips
     })
 
-# --- UI: SIDEBAR FOR UPLOADS ---
+# --- SIDEBAR CONTROLS ---
 with st.sidebar:
-    st.header("📤 Add New Video")
-    
-    # Notice the slider is now on the sidebar, accessible BEFORE processing!
-    num_clips = st.slider("Number of viral clips to find:", min_value=5, max_value=20, value=10)
+    st.header("⚙️ Controls & Upload")
+    num_clips = st.slider("Clips to generate per video:", min_value=5, max_value=20, value=10)
     
     tab1, tab2 = st.tabs(["YouTube Link", "Upload File"])
     new_video_path = None
-    video_title = "Untitled Municipal Meeting"
+    video_title = "Municipal Meeting"
 
     with tab1:
-        youtube_url = st.text_input("Paste YouTube URL:")
-        if st.button("Process YouTube Video"):
+        youtube_url = st.text_input("YouTube URL:")
+        if st.button("Process YouTube Link"):
             if youtube_url:
-                with st.spinner("Downloading video..."):
+                with st.spinner("Downloading..."):
+                    os.makedirs("data", exist_ok=True)
                     ydl_opts = {'format': 'best[ext=mp4]', 'outtmpl': 'data/downloaded_video.mp4'}
                     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                        info_dict = ydl.extract_info(youtube_url, download=True)
-                        video_title = info_dict.get('title', 'YouTube Video')
+                        info = ydl.extract_info(youtube_url, download=True)
+                        video_title = info.get('title', 'YouTube Video')
                     new_video_path = "data/downloaded_video.mp4"
 
     with tab2:
-        uploaded_file = st.file_uploader("Drop a .mov or .mp4 file here", type=['mp4', 'mov'])
+        uploaded_file = st.file_uploader("Drop .mp4 or .mov file", type=['mp4', 'mov'])
         if uploaded_file is not None:
-            if st.button("Process Uploaded File"):
-                new_video_path = uploaded_file.name
+            if st.button("Process Uploaded Video"):
+                os.makedirs("data", exist_ok=True)
+                new_video_path = os.path.join("data", uploaded_file.name)
                 video_title = uploaded_file.name
                 with open(new_video_path, "wb") as f:
                     f.write(uploaded_file.getbuffer())
 
-    # --- PIPELINE EXECUTION ---
     if new_video_path:
-        with st.spinner("Scanning for newsworthy moments..."):
-            # NOTE: In a live environment, you would call your actual models here.
-            # final_ranked_clips = fuse_modalities(text_clips, audio_spikes)[:num_clips]
+        with st.spinner("Analyzing audio, text, and civic themes..."):
+            audio_path = new_video_path.rsplit('.', 1)[0] + ".wav"
+            extract_audio_from_video(new_video_path, audio_path)
+            text_clips = analyze_and_extract(audio_path)
+            audio_spikes = detect_volume_spikes(audio_path)
+            final_ranked_clips = fuse_modalities(text_clips, audio_spikes)[:num_clips]
             
-            # Simulated data for the dashboard layout
-            mock_clips = [
-                 {
-                    "start": 120, "end": 185, "duration": 65,
-                    "metrics": {"virality_score": 0.92}, 
-                    "theme": "Policy Disagreement",
-                    "text": "This policy is an absolute failure and you know it! We have watched budget deficits climb for three consecutive quarters..."
-                },
-                {
-                    "start": 3400, "end": 3450, "duration": 50,
-                    "metrics": {"virality_score": 0.85}, 
-                    "theme": "Public Outcry",
-                    "text": "Order! Order in the chamber! If the gallery cannot maintain composure during public comment, I will direct security to clear the room immediately."
-                }
-            ]
-            
-            # Save the results to the library!
-            add_to_library(video_title, mock_clips[:num_clips])
-            st.success("Added to Dashboard!")
+            add_to_library(video_title, final_ranked_clips)
+            st.success("Analysis Complete! Added to library.")
 
-# --- UI: MAIN DASHBOARD GALLERY ---
-st.title("📼 Your Videos")
+# --- MAIN DASHBOARD GALLERY ---
+st.title("🏛️ Municipal Video Library")
 
 if len(st.session_state.video_library) == 0:
-    st.info("Your library is empty. Use the sidebar to upload a municipal meeting.")
+    st.info("No videos processed yet. Set your clip count on the sidebar and upload a video.")
 else:
-    # Build the Grid Layout
-    cols = st.columns(3) # Creates a 3-column grid for the video thumbnails
-    
+    cols = st.columns(2)
     for idx, video_data in enumerate(st.session_state.video_library):
-        col = cols[idx % 3] # Distributes the videos evenly across the 3 columns
-        
+        col = cols[idx % 2]
         with col:
-            # Create a card-like container for each video
             with st.container(border=True):
-                st.subheader(f"🏛️ {video_data['title'][:30]}...")
-                st.write(f"**{len(video_data['clips'])} Clips Generated**")
+                st.subheader(f"📹 {video_data['title']}")
+                st.write(f"**Total Clips Extracted:** {len(video_data['clips'])}")
                 
-                # When clicked, it displays the clips for THIS specific video
-                with st.expander("View Extracted Clips"):
+                with st.expander("View Timestamps & Transcripts"):
                     for i, clip in enumerate(video_data['clips']):
                         start_tc = format_timestamp(clip['start'])
                         end_tc = format_timestamp(clip['end'])
+                        theme = clip.get('theme', 'General Highlight').title()
                         
-                        st.markdown(f"### Clip #{i+1}: {clip.get('theme', 'Highlight')}")
-                        st.write(f"**Score:** {clip['metrics']['virality_score']} | **Length:** {clip['duration']}s")
+                        st.markdown(f"#### Clip #{i+1}: {theme}")
+                        st.write(f"**Score:** {clip['metrics']['virality_score']} | **Duration:** {clip['duration']}s")
+                        st.write(f"**Timecode:** `{start_tc}` ➔ `{end_tc}` ({clip['start']}s - {clip['end']}s)")
                         
-                        st.text_area("Transcript:", value=clip['text'], height=100, key=f"trans_{video_data['id']}_{i}")
-                        st.code(f"IN: {start_tc} | OUT: {end_tc}", language="text")
+                        st.text_area("Full Transcript:", value=clip['text'], height=90, key=f"tr_{video_data['id']}_{i}")
+                        st.code(f"IN: {start_tc} | OUT: {end_tc} | THEME: {theme}", language="text")
                         st.divider()
